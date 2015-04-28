@@ -69,6 +69,14 @@ class LibpfmHelperSuite(system: ActorSystem) extends UnitTest(system) {
     scale(now, old) should equal(None)
   }
 
+  "The detectedEvents method" should "detect the events available on the cpu on a linux system" ignore {
+    import LibpfmHelper.{init, deinit, detectedEvents}
+
+    init()
+    detectedEvents().isEmpty should equal(false)
+    deinit()
+  }
+
   "The libpfm library" can "be used on linux" ignore {
     val basepath = getClass.getResource("/").getPath
 

@@ -24,8 +24,8 @@ package org.powerapi.module.libpfm
 
 import org.apache.logging.log4j.LogManager
 import org.bridj.Pointer.{allocateCLongs, pointerTo, pointerToCString}
-import perfmon2.libpfm.{LibpfmLibrary, perf_event_attr, pfm_perf_encode_arg_t}
-import perfmon2.libpfm.LibpfmLibrary.pfm_os_t
+import perfmon2.libpfm.{pfm_pmu_info_t, perf_event_attr, pfm_perf_encode_arg_t, LibpfmLibrary, pfm_event_info_t, pfm_event_attr_info_t}
+import perfmon2.libpfm.LibpfmLibrary.{pfm_attr_t, pfm_pmu_t, pfm_os_t}
 import scala.collection.BitSet
 
 /**
@@ -212,5 +212,74 @@ object LibpfmHelper {
     }
 
     else None
+  }
+
+  /**
+   * Get the list of cpu events.
+   */
+  def detectedEvents(): Set[String] = {
+    lazy val detectedPmus = pmus()
+    (for(pmu <- detectedPmus) yield events(pmu)).flatten.toSet
+  }
+
+  /**
+   * PMUs detected on the processor.
+   * All the generic PMUs are removed because they used the specifics ones for the encoding.
+   */
+  private def pmus(): Seq[pfm_pmu_info_t] = {
+    // See the outputs of ./check_events from the examples folder in the libpfm library.
+    val generics = Array(pfm_pmu_t.PFM_PMU_INTEL_X86_ARCH, pfm_pmu_t.PFM_PMU_PERF_EVENT, pfm_pmu_t.PFM_PMU_PERF_EVENT_RAW)
+    val allSupportedPMUS = pfm_pmu_t.values().to[scala.collection.mutable.ArrayBuffer] -- generics
+    var activePMUS = Seq[pfm_pmu_info_t]()
+
+    // The bit is_present is checked to know if a PMU is available or not. A shift is done because of a jnaerator/bridj limitation with bit fields struct.
+    for(pmu <- allSupportedPMUS) {
+      val pinfo = new pfm_pmu_info_t
+      val pinfoPointer = pointerTo(pinfo)
+      val ret = LibpfmLibrary.pfm_get_pmu_info(pmu, pinfoPointer)
+
+      if(ret == LibpfmLibrary.PFM_SUCCESS && ((pinfo.bits_def >> 32) & 1) == 1) {
+        activePMUS :+= pinfo
+      }
+    }
+
+    activePMUS
+  }
+
+  /**
+   * Events attached to a PMU (with different UMASK).
+   */
+  private def events(pmu: pfm_pmu_info_t): Seq[String] = {
+    val einfo = new pfm_event_info_t
+    val einfoPointer = pointerTo(einfo)
+    var index = pmu.first_event
+    var events = Seq[String]()
+
+    while(index != -1) {
+      if(LibpfmLibrary.pfm_get_event_info(index, pfm_os_t.PFM_OS_PERF_EVENT, einfoPointer) == LibpfmLibrary.PFM_SUCCESS) {
+        // If there is no equivalent event, we can keep the event.
+        if(einfo.equiv == null) {
+          val eventName = einfo.name.getCString
+
+          // We keep only the events with at least one UMASK. The event with only modifiers are shortcuts.
+          for(i <- 0 until einfo.nattrs) {
+            val ainfo = new pfm_event_attr_info_t
+            val ainfoPointer = pointerTo(ainfo)
+            val ret = LibpfmLibrary.pfm_get_event_attr_info(einfo.idx, i, pfm_os_t.PFM_OS_PERF_EVENT, ainfoPointer)
+
+            if(ret == LibpfmLibrary.PFM_SUCCESS) {
+              // Filter on the type because it could be also a MODIFIER.
+              if(ainfo.`type`.value == pfm_attr_t.PFM_ATTR_UMASK.value) {
+                events :+= eventName + ":" + ainfo.name.getCString
+              }
+            }
+          }
+        }
+
+        index = LibpfmLibrary.pfm_get_event_next(index)
+      }
+    }
+
+    events
   }
 }
