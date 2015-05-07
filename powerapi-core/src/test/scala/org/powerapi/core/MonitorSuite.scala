@@ -458,8 +458,8 @@ class MonitorSuite(system: ActorSystem) extends UnitTest(system) {
     val monitor3 = new Monitor(eventBus, reporters)
 
     val display = new PowerDisplay {
-      def display(timestamp: Long, targets: Set[Target], devices: Set[String], power: Power): Unit = {
-        testActor ! s"$timestamp, ${targets.mkString(",")}, ${devices.mkString(",")}, $power"
+      def display(muid: UUID, timestamp: Long, targets: Set[Target], devices: Set[String], power: Power): Unit = {
+        testActor ! s"$muid, $timestamp, ${targets.mkString(",")}, ${devices.mkString(",")}, $power"
       }
     }
 
@@ -469,7 +469,7 @@ class MonitorSuite(system: ActorSystem) extends UnitTest(system) {
 
     monitor.to(display)
     publishRawPowerReport(monitor.muid, 1, 15.W, "gpu", tickMock)(eventBus)
-    expectMsgClass(classOf[String]) should equal(s"${tickMock.timestamp}, ${Process(1)}, gpu, ${15000.mW}")
+    expectMsgClass(classOf[String]) should equal(s"${monitor.muid}, ${tickMock.timestamp}, ${Process(1)}, gpu, ${15000.mW}")
     reporters.actorSelection("user/*") ! Identify(None)
     val reporter = expectMsgClass(classOf[ActorIdentity]).getRef
 
